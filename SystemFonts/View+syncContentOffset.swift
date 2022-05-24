@@ -6,8 +6,6 @@
 
 import SwiftUI
 import UIKit
-import RxSwift
-import RxCocoa
 
 extension View {
     func syncContentOffset() -> some View {
@@ -20,18 +18,28 @@ struct SyncContentOffsetViewModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content.injectViewController { viewController in
+            // If we find an UIScrollView ancestor...
             guard let scrollView = viewController.viewIfLoaded?.ascendant(ofType: UIScrollView.self) else {
                 return
             }
+            // ...we register it for sync
             contentOffsetSynchronizer.register(scrollView)
         }
     }
 }
 
 final class ContentOffsetSynchronizer : ObservableObject {
-    private let disposeBag = DisposeBag()
-    private let contentOffset = BehaviorSubject<CGPoint>(value: .zero)
+    private var observations: [NSKeyValueObservation] = []
     private let registrations = NSHashTable<UIScrollView>.weakObjects()
+
+    private var contentOffset: CGPoint = .zero {
+        didSet {
+            // Sync all scrollviews with to the new content offset
+            for scrollView in registrations.allObjects where scrollView.isInteracting == false {
+                scrollView.contentOffset = contentOffset
+            }
+        }
+    }
 
     func register(_ scrollView: UIScrollView) {
         scrollView.clipsToBounds = false
@@ -42,30 +50,36 @@ final class ContentOffsetSynchronizer : ObservableObject {
 
         registrations.add(scrollView)
 
-        // Share the scrollView.contentOffset if it changed because of user dragging it
-        scrollView.rx.contentOffset
-            .filter { [weak scrollView] _ in scrollView?.isDragging == true || scrollView?.isDecelerating == true }
-            .bind(to: contentOffset)
-            .disposed(by: disposeBag)
-
-        // When the shared contentOffset changed (or the scrollView.contentSize changed), update the scrollView.contentOffset
-        Observable.combineLatest(
-            contentOffset.distinctUntilChanged(==),
-            scrollView.rx.observe(\.contentSize).startWith(scrollView.contentSize),
-            resultSelector: { contentOffset, _ in contentOffset }
+        // When a user is interacting with the scrollView, we store its contentOffset
+        observations.append(
+            scrollView.observe(\.contentOffset, options: [.initial, .new]) { [weak self] scrollView, change in
+                guard let newValue = change.newValue, scrollView.isInteracting else {
+                    return
+                }
+                self?.contentOffset = newValue
+            }
         )
-        .filter { [weak scrollView] in $0 != scrollView?.contentOffset }
-        .bind(to: scrollView.rx.contentOffset)
-        .disposed(by: disposeBag)
-    }
-    
-    deinit {
-        contentOffset.onCompleted()
+        
+        // If a contentSize changes, we need to re-sync it with the current contentOffset
+        observations.append(
+            scrollView.observe(\.contentSize, options: [.initial, .new]) { [weak self] scrollView, change in
+                guard let contentOffset = self?.contentOffset else {
+                    return
+                }
+                scrollView.contentOffset = contentOffset
+            }
+        )
     }
 }
 
 extension UIView {
     fileprivate func ascendant<T: UIView>(ofType type: T.Type = T.self) -> T? {
         superview as? T ?? superview?.ascendant(ofType: type)
+    }
+}
+
+extension UIScrollView {
+    fileprivate var isInteracting: Bool {
+        isDragging || isDecelerating
     }
 }

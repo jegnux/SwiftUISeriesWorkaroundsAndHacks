@@ -21,19 +21,9 @@ private struct SyncWidthsViewModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .background(
-                GeometryReader { geometry in
-                    Color.clear
-                        .preference(
-                            key: GeometryWidthKey.self,
-                            value: geometry.size.width
-                        )
-                        .onPreferenceChange(GeometryWidthKey.self) { width in
-                            guard let width = width else { return }
-                            widthsStore.registerWidth(width, for: key)
-                        }
-                }
-            )
+            .onWidthChange { width in
+                widthsStore.registerWidth(width, for: key)
+            }
             .frame(minWidth: widthsStore.width(for: key), alignment: alignment)
     }
 }
@@ -61,5 +51,23 @@ private struct GeometryWidthKey: PreferenceKey {
     static var defaultValue: CGFloat? { nil }
     static func reduce(value: inout CGFloat?, nextValue: () -> CGFloat?) {
         value = nextValue()
+    }
+}
+
+extension View {
+    func onWidthChange(_ handler: @escaping (CGFloat) -> Void) -> some View {
+        self.background(
+            GeometryReader { geometry in
+                Color.clear
+                    .preference(
+                        key: GeometryWidthKey.self,
+                        value: geometry.size.width
+                    )
+                    .onPreferenceChange(GeometryWidthKey.self) { width in
+                        guard let width = width else { return }
+                        handler(width)
+                    }
+            }
+        )
     }
 }

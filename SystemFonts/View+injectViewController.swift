@@ -5,8 +5,6 @@
 //
 
 import SwiftUI
-import RxSwift
-import RxRelay
 
 extension View {
     func injectViewController(_ handler: @escaping (UIViewController) -> Void) -> some View {
