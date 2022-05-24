@@ -70,6 +70,10 @@ final class ContentOffsetSynchronizer : ObservableObject {
             }
         )
     }
+    
+    deinit {
+        observations.forEach { $0.invalidate() }
+    }
 }
 
 extension UIView {
